@@ -105,7 +105,7 @@ stock, reorder threshold, optional category, unit, and reorder quantity.
 python supervisor_dashboard.py
 ```
 
-Open [http://127.0.0.1:5000](http://127.0.0.1:5000). Enter the authorized
+Open local host . Enter the authorized
 maximum unit price and click **Run agent**. The dashboard launches the fixed
 agent entry point and streams its standard output and errors to the page. It
 also refreshes inventory, tasks, conversations, and metrics periodically.
