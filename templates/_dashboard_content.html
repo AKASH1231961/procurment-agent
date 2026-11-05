@@ -1,0 +1,337 @@
+{#- Single root element: the page swaps this whole block in every 5 s. -#}
+{% macro bar(rate, color="") -%}
+  <div class="track"><div class="fill {{ color }}" style="width: {{ ((rate or 0) * 100)|round|int }}%"></div></div>
+{%- endmacro %}
+
+{% macro cmp(label, value, color, note="") -%}
+  <div class="compare-line"><span>{{ label }}</span>{{ bar(value, color) }}<b>{{ value|pct if value is not none else "—" }}</b></div>
+{%- endmacro %}
+
+{% set r = snapshot.retrieval %}
+{% set adv = r.advised %}
+{% set oth = r.not_advised %}
+
+<div class="dash">
+
+<section class="section" id="overview">
+  <div class="section-head">
+    <div>
+      <h1>Supervisor overview</h1>
+      <p>Inventory risk, procurement progress and how well the buyer agent is negotiating.</p>
+    </div>
+    <span class="stamp">Updated {{ snapshot.updated_at }}</span>
+  </div>
+
+  {% if snapshot.database_error %}
+    <div class="alert" role="status"><strong>Inventory data unavailable.</strong> {{ snapshot.database_error }}</div>
+  {% endif %}
+
+  <div class="kpis">
+    <article class="kpi tone-brand">
+      <div class="kpi-label">Agreement rate</div>
+      <div class="kpi-value">{{ snapshot.agreement_rate|pct }}</div>
+      <div class="kpi-note">{{ snapshot.agreements }} agreements / {{ snapshot.completed_negotiations }} completed negotiations</div>
+    </article>
+    <article class="kpi tone-green">
+      <div class="kpi-label">Savings vs. budget</div>
+      <div class="kpi-value">{{ snapshot.savings_vs_budget|pct(1) }}</div>
+      <div class="kpi-note">Average (max − agreed) ÷ max across {{ snapshot.savings_vs_budget_sample }} deals</div>
+    </article>
+    <article class="kpi tone-green">
+      <div class="kpi-label">Total cost avoided</div>
+      <div class="kpi-value">${{ "{:,.2f}".format(snapshot.total_cost_avoided) }}</div>
+      <div class="kpi-note">(max − agreed) × quantity, agreed deals</div>
+    </article>
+    <article class="kpi tone-blue">
+      <div class="kpi-label">Savings vs. seller’s first ask</div>
+      <div class="kpi-value">{{ snapshot.savings_vs_first_ask|pct(1) }}</div>
+      <div class="kpi-note">{{ snapshot.savings_vs_first_ask_sample }} deals where the seller countered first</div>
+    </article>
+    <article class="kpi tone-amber">
+      <div class="kpi-label">Average negotiation time</div>
+      <div class="kpi-value">{{ snapshot.avg_session_seconds|duration }}</div>
+      <div class="kpi-note">Longest {{ snapshot.max_session_seconds|duration }} · {{ snapshot.latency_sessions }} sessions</div>
+    </article>
+    <article class="kpi tone-blue">
+      <div class="kpi-label">Budget compliance</div>
+      <div class="kpi-value">{{ snapshot.budget_compliance_rate|pct }}</div>
+      <div class="kpi-note">{{ snapshot.budget_compliant_agreements }} of {{ snapshot.budget_evaluable_agreements }} deals within the authorized limit</div>
+    </article>
+  </div>
+
+  <div class="statusbar" aria-label="Live status">
+    <div><span>Live negotiations</span><strong>{{ snapshot.active_sessions }}</strong></div>
+    <div><span>Active tasks</span><strong>{{ snapshot.active_tasks }}</strong></div>
+    <div><span>Inventory shortages</span><strong>{{ snapshot.shortages }}</strong></div>
+    <div><span>Task completion</span><strong>{{ snapshot.task_completion.rate|pct }}</strong></div>
+    <div><span>LLM tokens</span><strong>{{ "{:,}".format(snapshot.token_usage.total) }}</strong></div>
+  </div>
+</section>
+
+<section class="section" id="performance">
+  <div class="section-head">
+    <div>
+      <h2>Agent performance</h2>
+      <p>Deal quality, efficiency, learning over repeated sessions and tactical retrieval.</p>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <section class="panel">
+      <div class="panel-head"><div><h3>Agreement by product</h3><p>Completed negotiations that ended in a deal</p></div><span class="pill">{{ snapshot.agreement_by_product|length }} products</span></div>
+      {% if snapshot.agreement_by_product %}
+        <div class="bars">
+          {% for row in snapshot.agreement_by_product %}
+            <div>
+              <div class="bar-row-top"><strong>{{ row.name }}</strong><span>{{ row.agreements }} / {{ row.completed }} · {{ row.rate|pct }}</span></div>
+              {{ bar(row.rate, "green" if row.rate >= 0.7 else "amber" if row.rate >= 0.4 else "gray") }}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty"><strong>No completed negotiations yet</strong><p>Rates appear after negotiations finish.</p></div>
+      {% endif %}
+    </section>
+    <section class="panel">
+      <div class="panel-head"><div><h3>Agreement by supplier</h3><p>Which sellers the buyer closes deals with</p></div><span class="pill">{{ snapshot.agreement_by_supplier|length }} suppliers</span></div>
+      {% if snapshot.agreement_by_supplier %}
+        <div class="bars">
+          {% for row in snapshot.agreement_by_supplier %}
+            <div>
+              <div class="bar-row-top"><strong>{{ row.name }}</strong><span>{{ row.agreements }} / {{ row.completed }} · {{ row.rate|pct }}</span></div>
+              {{ bar(row.rate, "green" if row.rate >= 0.7 else "amber" if row.rate >= 0.4 else "gray") }}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty"><strong>No completed negotiations yet</strong><p>Rates appear after negotiations finish.</p></div>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="grid-2">
+    <section class="panel">
+      <div class="panel-head"><div><h3>Efficiency</h3><p>Time per turn, from logged message timestamps</p></div></div>
+      <div class="stats">
+        <div class="stat"><span>Seller reply (avg)</span><strong>{{ snapshot.avg_seller_response_seconds|duration }}</strong></div>
+        <div class="stat"><span>Seller reply (median)</span><strong>{{ snapshot.median_seller_response_seconds|duration }}</strong></div>
+        <div class="stat"><span>Buyer decision (avg)</span><strong>{{ snapshot.avg_buyer_decision_seconds|duration }}</strong></div>
+      </div>
+      <p class="footnote">Seller reply is buyer message → seller reply. Buyer decision is seller reply → next buyer message, including retrieval and LLM time.</p>
+      {% set tk = snapshot.token_usage %}
+      <div class="bars" style="margin-top: 18px">
+        <div>
+          <div class="bar-row-top"><strong>Token usage</strong><span>{{ "{:,}".format(tk.total) }} total</span></div>
+          <div class="track"><div class="fill blue" style="width: {{ (tk.input / tk.total * 100)|round|int if tk.total else 0 }}%"></div></div>
+          <div class="bar-row-top" style="margin: 6px 0 0"><span>Input {{ "{:,}".format(tk.input) }}</span><span>Output {{ "{:,}".format(tk.output) }}</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div><h3>Price vs. logged benchmark</h3><p>How the agreed price compares with the supplier’s listed price</p></div>
+        {% if snapshot.price_quality_rate is not none %}<span class="pill {{ 'good' if snapshot.price_quality_rate >= 0 else 'bad' }}">{{ 'Below benchmark' if snapshot.price_quality_rate >= 0 else 'Above benchmark' }}</span>{% endif %}
+      </div>
+      <div class="stats" style="grid-template-columns: 1fr 1fr">
+        <div class="stat"><span>Average difference</span><strong>{{ snapshot.price_quality_rate|pct(1, signed=True) }}</strong></div>
+        <div class="stat"><span>Benchmarked deals</span><strong>{{ snapshot.price_quality_sample_size }} <small style="font-size:13px;color:var(--muted);font-weight:500">of {{ snapshot.agreements }}</small></strong></div>
+      </div>
+      <p class="footnote">Positive means the buyer paid less than the benchmark; negative means it paid more. {{ snapshot.missing_benchmarks }} agreed deals have no logged benchmark and are excluded. Benchmarks come from sourcing and may be estimates.</p>
+    </section>
+  </div>
+
+  <div class="grid-2">
+    <section class="panel">
+      <div class="panel-head">
+        <div><h3>Tactical retrieval effectiveness</h3><p>What the seller does after the buyer retrieves negotiation tactics</p></div>
+        <span class="pill">{{ r.retrievals }} retrievals · {{ r.retrievals_with_examples }} with examples</span>
+      </div>
+      <div class="legend"><span><i></i>Advised rounds ({{ adv.rounds }})</span><span><i class="gray"></i>Other rounds ({{ oth.rounds }})</span></div>
+      <div class="compare">
+        <div>
+          <div class="compare-title">Seller agreed on the next reply</div>
+          <div class="compare-pair">
+            {{ cmp("Advised", (adv.agreed_next / adv.rounds) if adv.rounds else none, "") }}
+            {{ cmp("Other", (oth.agreed_next / oth.rounds) if oth.rounds else none, "gray") }}
+          </div>
+        </div>
+        <div>
+          <div class="compare-title">Average gap closed while still negotiating</div>
+          <div class="compare-pair">
+            {{ cmp("Advised", adv.avg_gap_closure, "") }}
+            {{ cmp("Other", oth.avg_gap_closure, "gray") }}
+          </div>
+        </div>
+        <div>
+          <div class="compare-title">Session agreement rate</div>
+          <div class="compare-pair">
+            {{ cmp("With retrieval", r.agreement_rate_with_retrieval, "") }}
+            {{ cmp("Without", r.agreement_rate_without_retrieval, "gray") }}
+          </div>
+        </div>
+      </div>
+      <p class="footnote">
+        {% if r.retrievals == 0 %}No retrieval has fired yet — it triggers on a large price gap or a stalled negotiation. {% endif %}
+        Advised rounds are the hard ones, so this is a comparison, not a controlled test.
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div><h3>Learning over repeated sessions</h3><p>Savings vs. budget, first session to latest, per product</p></div>
+        <span class="pill">{{ snapshot.learning_improved_products }} / {{ snapshot.learning_comparable_products }} improved{% if snapshot.learning_avg_change is not none %} · {{ snapshot.learning_avg_change|pct(1, signed=True) }}{% endif %}</span>
+      </div>
+      {% if snapshot.learning_by_product %}
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Product</th><th>Trend</th><th class="n">First</th><th class="n">Latest</th><th class="n">Change</th></tr></thead>
+            <tbody>
+              {% for row in snapshot.learning_by_product %}
+                {% set top = (row.savings_series|max) if row.savings_series else 0 %}
+                <tr>
+                  <td><strong>{{ row.product }}</strong><small>{{ row.sessions }} sessions · {{ row.agreements }} agreed</small></td>
+                  <td><div class="spark" title="Savings per agreed session">{% for v in row.savings_series %}<i style="height: {{ ((v / top * 100)|round|int if top > 0 else 10) }}%"></i>{% endfor %}</div></td>
+                  <td class="n">{{ row.first_savings|pct(1) }}</td>
+                  <td class="n">{{ row.latest_savings|pct(1) }}</td>
+                  <td class="n"><span class="delta {{ 'flat' if row.change is none or row.change == 0 else 'up' if row.change > 0 else 'down' }}">{{ row.change|pct(1, signed=True) if row.change is not none else "—" }}</span></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if snapshot.savings_by_applied_strategy %}
+          <p class="footnote">Average savings by the strategy the parent agent set for the session:
+            {% for row in snapshot.savings_by_applied_strategy %}<strong>{{ row.strategy }}</strong> {{ row.avg_savings|pct(1) }} ({{ row.sessions }}){% if not loop.last %} · {% endif %}{% endfor %}</p>
+        {% endif %}
+      {% else %}
+        <div class="empty"><strong>No repeated sessions yet</strong><p>A product needs at least two completed negotiations to show a trend.</p></div>
+      {% endif %}
+    </section>
+  </div>
+</section>
+
+<section class="section">
+  <div class="grid-2">
+    <section class="panel" id="inventory">
+      <div class="panel-head"><div><h3>Inventory watch</h3><p>Stock against each item’s reorder point</p></div><span class="pill">{{ snapshot["items"]|length }} item{{ "" if snapshot["items"]|length == 1 else "s" }}</span></div>
+      {% if snapshot["items"] %}
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Item</th><th>Stock</th><th class="n">Reorder at</th><th class="n">Health</th></tr></thead>
+            <tbody>
+              {% for item in snapshot["items"] %}
+                {% set low = item.current_stock <= item.reorder_threshold %}
+                {% set ceiling = (item.reorder_threshold * 2) if item.reorder_threshold else 1 %}
+                <tr>
+                  <td><strong>{{ item.name }}</strong><small>{{ item.sku }}{% if item.category %} · {{ item.category }}{% endif %}</small></td>
+                  <td class="stock">{{ item.current_stock|round(1)|string|replace('.0', '') }} {{ item.unit }}
+                    <div class="track"><div class="fill {{ 'amber' if low else 'green' }}" style="width: {{ [100, (item.current_stock / ceiling * 100)|round|int]|min }}%"></div></div></td>
+                  <td class="n">{{ item.reorder_threshold|round(1)|string|replace('.0', '') }} {{ item.unit }}</td>
+                  <td class="n"><span class="badge {{ 'badge-reorder' if low else 'badge-healthy' }}">{{ "Reorder" if low else "Healthy" }}</span></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty"><strong>No inventory records</strong><p>Items appear here once they are added to the procurement database.</p></div>
+      {% endif %}
+    </section>
+
+    <section class="panel" id="tasks">
+      <div class="panel-head"><div><h3>Procurement tasks</h3><p>Restocking needs handed to the buyer agent</p></div><span class="pill">{{ snapshot.tasks|length }} task{{ "" if snapshot.tasks|length == 1 else "s" }}</span></div>
+      {% if snapshot.tasks %}
+        <div class="task-list">
+          {% for task in snapshot.tasks %}
+            <article class="task">
+              <div class="task-top"><strong>{{ task.item_name }}</strong><span class="badge badge-{{ task.status }}">{{ task.status }}</span></div>
+              <p>Task #{{ task.task_id }} · {{ task.target_quantity|round(1)|string|replace('.0', '') }} units · {{ task.sku }}</p>
+              <small>Opened {{ task.opened_at }}</small>
+              {% set task_suppliers = snapshot.suppliers|selectattr("task_id", "equalto", task.task_id)|list %}
+              {% if task_suppliers %}
+                <p>Candidates:
+                  {% for supplier in task_suppliers %}{{ supplier.supplier_name }}{% if supplier.estimated_price is not none %} ({{ supplier.currency or "USD" }} {{ "%.2f"|format(supplier.estimated_price) }}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+                </p>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty"><strong>No procurement tasks yet</strong><p>Tasks are created when stock falls to its reorder threshold.</p></div>
+      {% endif %}
+    </section>
+  </div>
+</section>
+
+<section class="section" id="conversations">
+  <div class="section-head">
+    <div>
+      <h2>Negotiation conversations</h2>
+      <p>Buyer and seller messages, outcomes and parent-agent feedback.</p>
+    </div>
+    <span class="pill">{{ snapshot.sessions|length }} recent</span>
+  </div>
+  {% if snapshot.sessions %}
+    <div class="convo-list">
+      {% for session in snapshot.sessions %}
+        {% set prices = session.messages|selectattr("price")|map(attribute="price")|list %}
+        <details class="convo" data-session-id="{{ session.id }}" {% if loop.first %}open{% endif %}>
+          <summary>
+            <span class="convo-title"><strong>{{ session.product }}</strong><span>{{ session.seller }} · {{ session.started_at|when }}</span></span>
+            <span class="journey" title="Price per unit across the conversation">
+              {% if prices %}
+                {% for p in prices %}<b>{{ "%.2f"|format(p) }}</b>{% if not loop.last %}<em>→</em>{% endif %}{% endfor %}
+              {% else %}<span class="none">No prices recorded</span>{% endif %}
+            </span>
+            <span class="convo-right">
+              <span class="badge badge-{{ session.status|lower|replace(' ', '-') }}">{{ session.status }}</span>
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+            </span>
+          </summary>
+          <div class="convo-body">
+            <div class="facts">
+              <div class="fact"><span>Session</span><strong>{{ session.id }}</strong></div>
+              {% if session.quantity %}<div class="fact"><span>Quantity</span><strong>{{ session.quantity }}</strong></div>{% endif %}
+              {% if session.opening_offer %}<div class="fact"><span>Opening offer</span><strong>{{ session.opening_offer }}</strong></div>{% endif %}
+              {% if session.max_price %}<div class="fact"><span>Buyer limit</span><strong>{{ session.max_price }}</strong></div>{% endif %}
+              {% if session.benchmark_price %}<div class="fact"><span>Supplier reference</span><strong>{{ session.benchmark_price }}</strong></div>{% endif %}
+              {% if session.agreed_price %}<div class="fact"><span>Agreed price</span><strong>{{ session.agreed_price }}</strong></div>{% endif %}
+              <div class="fact"><span>Turns</span><strong>{{ session.messages|length }}</strong></div>
+            </div>
+            {% if session.messages %}
+              <div class="thread">
+                {% for message in session.messages %}
+                  <article class="msg {{ 'buyer' if message.speaker == 'Buyer' else 'seller' }}">
+                    <div class="msg-head">
+                      <strong>{{ message.speaker }} agent</strong><span class="type">{{ message.message_type }}</span>
+                      {% if message.timestamp %}<time>{{ message.timestamp|when }}</time>{% endif %}
+                    </div>
+                    <p>{{ message.text or "No message text was recorded." }}</p>
+                    {% if message.price %}<span class="price-chip">${{ "%.2f"|format(message.price) }} / unit</span>{% endif %}
+                  </article>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="footnote">No dialogue turns have been written for this session yet.</p>
+            {% endif %}
+            {% if session.tactical_advice %}
+              <div class="note feedback"><div><strong>Tactical retrieval used</strong>
+                {% for advice in session.tactical_advice %}After turn {{ advice.after_turn }}: {{ advice.triggers|replace("_", " ") }} ({{ advice.status|replace("_", " ") }}){% if not loop.last %}; {% endif %}{% endfor %}
+              </div></div>
+            {% endif %}
+            {% if session.reason %}<div class="note reason"><div><strong>Outcome note</strong>{{ session.reason }}</div></div>{% endif %}
+            {% if session.evaluation and session.evaluation.feedback %}
+              <div class="note feedback"><div><strong>Parent agent feedback</strong>{{ session.evaluation.feedback }}
+                {% if session.evaluation.strategy %}<br><small>Next-session strategy: <code>{{ session.evaluation.strategy }}</code></small>{% endif %}</div></div>
+            {% endif %}
+          </div>
+        </details>
+      {% endfor %}
+    </div>
+  {% else %}
+    <section class="panel"><div class="empty"><strong>No negotiation sessions recorded</strong><p>When the buyer agent negotiates with a supplier, the live transcript appears here.</p></div></section>
+  {% endif %}
+</section>
+
+</div>
